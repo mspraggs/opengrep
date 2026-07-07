@@ -41,8 +41,9 @@ class SarifFormatter(base.BaseFormatter):
               rule_file = exit_stack.enter_context(
                   tempfile.NamedTemporaryFile("w+", suffix=".json", delete=False)
               ) # (not IS_WINDOWS) causes failures.
+              # No indent: this is only read back by opengrep-core.
               rule_file_contents = json.dumps(
-                  {"rules": [rule._raw for rule in rules]}, indent=2, sort_keys=True
+                  {"rules": [rule._raw for rule in rules]}, sort_keys=True
               )
               rule_file.write(rule_file_contents)
               rule_file.flush()

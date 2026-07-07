@@ -871,8 +871,10 @@ Could not find the semgrep-core executable. Your Semgrep install is likely corru
             ]
 
             # adding rules option
+            # No indent: this is only read by opengrep-core, and indenting
+            # roughly doubles the serialization time and output size.
             rule_file_contents = json.dumps(
-                {"rules": [rule._raw for rule in rules]}, indent=2, sort_keys=True
+                {"rules": [rule._raw for rule in rules]}, sort_keys=True
             )
             rule_file.write(rule_file_contents)
             rule_file.flush()

@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 import re
 from io import StringIO
 from pathlib import Path
@@ -543,16 +545,82 @@ class RpcValidationError(Exception):
     pass
 
 
+# Cap on the number of cached validation markers, to keep the cache dir from
+# growing without bound for users whose rules change on every scan.
+_VALIDATION_CACHE_MAX_ENTRIES = 100
+
+
+def _rpc_validation_cache_key(rules_content: bytes) -> Optional[str]:
+    """
+    Cache key for a successful semgrep-core rule validation.
+
+    Keyed on the rules bytes and the identity of the core binary (path, size,
+    mtime), so a core upgrade or binary swap invalidates all prior entries.
+    Returns None if the key can't be computed; callers must then validate.
+    """
+    try:
+        # Local import to avoid a circular import at module load time
+        from semgrep.semgrep_core import SemgrepCore
+
+        core_path = SemgrepCore.executable_path()
+        stat = os.stat(core_path)
+        h = hashlib.sha256()
+        h.update(f"{core_path}|{stat.st_size}|{stat.st_mtime_ns}|".encode())
+        h.update(rules_content)
+        return h.hexdigest()
+    except Exception as e:
+        logger.debug(f"Could not compute rule-validation cache key: {e}")
+        return None
+
+
+def _rpc_validation_cache_dir() -> Path:
+    from semgrep.state import get_state
+
+    return get_state().env.user_data_folder / "cache" / "validated_rules"
+
+
 def run_rpc_validate(rules_tmp_path: str) -> Literal[True]:
+    # Validation via RPC spawns an opengrep-core subprocess and parses the
+    # whole rules file in it, which can take a substantial fraction of a
+    # second. The result only depends on the rules content and the core
+    # binary, so cache successful validations and skip the subprocess when
+    # the same rules were already validated by the same core binary.
+    cache_file: Optional[Path] = None
+    try:
+        rules_content = Path(rules_tmp_path).read_bytes()
+        key = _rpc_validation_cache_key(rules_content)
+        if key is not None:
+            cache_file = _rpc_validation_cache_dir() / key
+            if cache_file.is_file():
+                logger.debug("Rule validation cache hit; skipping RPC validation")
+                return True
+    except Exception as e:
+        logger.debug(f"Rule-validation cache lookup failed: {e}")
+        cache_file = None
+
     try:
         valid = rpc_validate(out.Fpath(rules_tmp_path))
         logger.debug(f"semgrep-core validation response: {valid=}")
         if valid:
             logger.debug("semgrep-core validation succeeded")
+            if cache_file is not None:
+                _record_validation_success(cache_file)
             return True
         raise RpcValidationError("semgrep-core validation failed")
     except Exception as e:
         raise e
+
+
+def _record_validation_success(cache_file: Path) -> None:
+    try:
+        cache_dir = cache_file.parent
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file.touch()
+        entries = sorted(cache_dir.iterdir(), key=lambda p: p.stat().st_mtime)
+        for stale in entries[:-_VALIDATION_CACHE_MAX_ENTRIES]:
+            stale.unlink(missing_ok=True)
+    except Exception as e:
+        logger.debug(f"Could not record rule-validation cache entry: {e}")
 
 
 @tracing.trace()
