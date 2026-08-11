@@ -418,9 +418,8 @@ let cli_output_of_runner_result ~fixed_lines (core : Out.core_output)
    explanations;
    interfile_languages_used;
    time;
-   (* LATER *)
-   rules_by_engine = _;
-   engine_requested = _;
+   rules_by_engine;
+   engine_requested;
   } ->
       (* TODO: not sure how it's sorted. Look at rule_match.py keys? *)
       let matches =
@@ -472,7 +471,8 @@ let cli_output_of_runner_result ~fixed_lines (core : Out.core_output)
         explanations;
         interfile_languages_used;
         time;
-        (* LATER *)
-        rules_by_engine = None;
-        engine_requested = None;
+        (* passed through from the core scan, like pysemgrep does
+         * (see cli_output_extra in output.py) *)
+        rules_by_engine;
+        engine_requested;
       }
