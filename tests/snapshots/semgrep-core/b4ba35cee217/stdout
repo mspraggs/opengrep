@@ -1,0 +1,2 @@
+{"version":"<MASKED>","results":[],"errors":[{"code":7,"level":"warn","type":"Invalid YAML","message":"Invalid YAML at line rules.yaml:1:\n (approximate error location; error nearby after) error calling parser: did not find expected node content character 0 position 0 returned: 0","path":"rules.yaml"}],"paths":{"scanned":[]},"interfile_languages_used":[],"skipped_rules":[]}
+exit code: 2

@@ -1,0 +1,2 @@
+{"version":"<MASKED>","results":[],"errors":[{"code":2,"level":"error","type":"Rule parse error","rule_id":"eqeq-bad","message":"Rule parse error in rule eqeq-bad:\n Missing required field message"}],"paths":{"scanned":[]},"interfile_languages_used":[],"skipped_rules":[]}
+exit code: 2

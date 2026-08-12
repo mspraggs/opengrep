@@ -1,0 +1,2 @@
+{"version":"<MASKED>","results":[],"errors":[{"code":2,"level":"error","type":"Rule parse error","rule_id":"eqeq-bad","message":"Rule parse error in rule eqeq-bad:\n Missing required field message"},{"code":2,"level":"error","type":"Semgrep match found","rule_id":"opengrep.test.metacheck","message":"Semgrep match found when running opengrep.test.metacheck on b_metacheck.yaml:\n this rule was flagged by the metachecks","path":"b_metacheck.yaml"}],"paths":{"scanned":[]},"interfile_languages_used":[],"skipped_rules":[]}
+exit code: 2

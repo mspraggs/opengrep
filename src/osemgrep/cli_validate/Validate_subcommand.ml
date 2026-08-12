@@ -105,8 +105,18 @@ let metarules_pack = "p/semgrep-rule-lints"
 (*****************************************************************************)
 (* Targeting (finding the semgrep yaml files to validate) *)
 (*****************************************************************************)
-let find_targets_rules (caps : < caps ; .. >) ~(strict : bool)
-    (rules_source : Rules_source.t) : Fpath.t list * int * int * int =
+(* What checks (1) and (2) found: the rule files to metacheck, the rules that
+ * could be parsed, and the errors. We keep the errors themselves and not just
+ * their number because --json reports them. *)
+type targeting_result = {
+  targets : Fpath.t list;
+  rules : Rule.rules;
+  fatal_errors : Rule_error.t list;
+  invalid_rules : Rule_error.invalid_rule list;
+}
+
+let find_targets_rules (caps : < caps ; .. >) ~(strict : bool) ~(json : bool)
+    (rules_source : Rules_source.t) : targeting_result =
   (* Checking (1) and (2). Parsing the rules is already a form of validation.
    * Before running metachecks on those rules, we make sure we can parse them.
    * TODO: report not only Rule.invalid_rule_errors but all Rule.Error.t for (1)
@@ -137,7 +147,9 @@ let find_targets_rules (caps : < caps ; .. >) ~(strict : bool)
          match err with
          (* to get the "Missing semgrep extension ... install --pro" error *)
          (* alt: just warn *)
-         | MissingPlugin s, _, _ -> Error.abort s
+         (* with --json we must not die here: the error belongs in the
+          * document, which error_of_invalid_rule renders as MissingPlugin. *)
+         | MissingPlugin s, _, _ when not json -> Error.abort s
          | _ ->
              Logs.warn (fun m -> m "%s" (Rule_error.string_of_invalid_rule err)));
   (* In a validate context, rules are actually targets of metarules.
@@ -176,10 +188,7 @@ let find_targets_rules (caps : < caps ; .. >) ~(strict : bool)
           "no rules were metachecked: none of the given configs is a local \
            file or directory (registry, URL and git+ configs are parsed but \
            not metachecked)");
-  ( targets,
-    List.length rules,
-    List.length fatal_errors,
-    List.length invalid_rules )
+  { targets; rules; fatal_errors; invalid_rules }
 
 (*****************************************************************************)
 (* Checking the rules *)
@@ -188,6 +197,12 @@ let find_targets_rules (caps : < caps ; .. >) ~(strict : bool)
 (* Checking (3) *)
 let check_targets_rules (caps : < caps ; .. >) targets_rules
     core_runner_conf =
+  if List_.null targets_rules then
+    (* Running the metarules over no target can only produce no finding, so
+     * skip it, and with it the fetch of the metarules from the registry.
+     * find_targets_rules warns when this is unexpected. *)
+    []
+  else
   let in_docker = !Semgrep_envvars.v.in_docker in
   let (config : Rules_config.t) =
     Rules_config.parse_config_string ~in_docker metarules_pack
@@ -276,6 +291,57 @@ let report_errors (_caps : < Cap.stdout >) ~metacheck_errors ~num_errors
   ()
 
 (*****************************************************************************)
+(* JSON reporting *)
+(*****************************************************************************)
+
+(* A metacheck finding is a match of a metarule, which we report as an error.
+ * coupling: Check_rule.ml builds the same Out.SemgrepMatchFound errors.
+ * We build from the cli_match rather than from the core match so that the
+ * message is the one with the metavariables interpolated, i.e. the same
+ * string the text report above prints.
+ * Unlike pysemgrep, which omits the path of these errors because for it the
+ * rule lives in a temporary file, we keep the location: our path is the rule
+ * file the user passed.
+ *)
+let core_error_of_metacheck_match (x : Out.cli_match) : Core_error.t =
+  let loc : Tok.location =
+    {
+      Tok.str = "";
+      (* a column is 1-based in Out.position but 0-based in Pos *)
+      pos =
+        Pos.make ~line:x.start.line ~column:(x.start.col - 1) x.path
+          x.start.offset;
+    }
+  in
+  Core_error.mk_error ~rule_id:x.check_id ~msg:x.extra.message ~loc
+    Out.SemgrepMatchFound
+
+(* coupling: pysemgrep reports the errors of the configuration first and the
+ * metacheck ones after (see the --validate branch of scan.py). Nothing down
+ * the line sorts the errors, so this order is the order in the JSON. *)
+let core_errors_of_validation (targeting : targeting_result)
+    (metacheck_errors : Out.cli_match list) : Core_error.t list =
+  List_.map Core_error.error_of_rule_error targeting.fatal_errors
+  @ List_.map Core_error.error_of_invalid_rule targeting.invalid_rules
+  @ List_.map core_error_of_metacheck_match metacheck_errors
+
+(* Report the errors as the JSON document 'semgrep scan' would produce for a
+ * scan that found nothing but errors.
+ * coupling: same approach as
+ * Scan_subcommand.output_and_exit_from_fatal_core_errors_exn
+ *)
+let report_errors_json (caps : < Cap.stdout >) (errors : Core_error.t list) :
+    unit =
+  let res =
+    Core_runner.mk_result [] (Core_result.mk_result_with_just_errors errors)
+  in
+  let conf = { Output.default with output_format = Output_format.Json } in
+  let (_ : Out.cli_output) =
+    Output.output_result caps conf (Profiler.make ()) res
+  in
+  ()
+
+(*****************************************************************************)
 (* Run the conf *)
 (*****************************************************************************)
 
@@ -285,23 +351,35 @@ let run_conf (caps : < caps ; .. >) (conf : Validate_CLI.conf) : Exit_code.t =
   (* if conf.pro then !hook_pro_init (); *)
 
   (* step1: getting the targets (which contain rules) *)
-  let targets_rules, num_rules, num_fatal_errors, num_invalid_rules =
+  let targeting =
     find_targets_rules caps ~strict:conf.core_runner_conf.strict
-      conf.rules_source
+      ~json:conf.json conf.rules_source
   in
 
   (* step2: checking the rules *)
   let metacheck_errors =
-    check_targets_rules caps targets_rules conf.core_runner_conf
+    check_targets_rules caps targeting.targets conf.core_runner_conf
   in
 
   (* step3: summarizing findings (errors) *)
   (* num_errors counts the skippable errors only; the fatal ones are reported
    * separately, hence the two counts below. *)
-  let num_errors = num_invalid_rules + List.length metacheck_errors in
+  let num_fatal_errors = List.length targeting.fatal_errors in
+  let num_errors =
+    List.length targeting.invalid_rules + List.length metacheck_errors
+  in
+  (* The report below goes to stderr (Logs), so it does not interfere with the
+   * JSON on stdout and we can produce both, as pysemgrep does. *)
   report_errors
     (caps :> < Cap.stdout >)
-    ~metacheck_errors ~num_errors ~num_fatal_errors ~num_rules;
+    ~metacheck_errors ~num_errors ~num_fatal_errors
+    ~num_rules:(List.length targeting.rules);
+  (* Like pysemgrep, we produce the document only when there is something to
+   * report: a valid configuration prints nothing on stdout. *)
+  if conf.json then (
+    let core_errors = core_errors_of_validation targeting metacheck_errors in
+    if not (List_.null core_errors) then
+      report_errors_json (caps :> < Cap.stdout >) core_errors);
 
   (* step4: exit code.
    * The fatal errors count here too: a config we could not even parse is

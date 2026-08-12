@@ -1363,8 +1363,8 @@ let show_CLI_conf ~dump_ast ~dump_engine_path ~dump_command_for_core
       Some { Show.show_kind = Show.SupportedLanguages; json; html = false; common }
   | _else_ -> None
 
-let validate_CLI_conf ~validate ~rules_source ~core_runner_conf ~common ~pro :
-    Validate_CLI.conf option =
+let validate_CLI_conf ~validate ~rules_source ~core_runner_conf ~json ~common
+    ~pro : Validate_CLI.conf option =
   if validate then
     match rules_source with
     | Rules_source.Configs [] ->
@@ -1374,7 +1374,7 @@ let validate_CLI_conf ~validate ~rules_source ~core_runner_conf ~common ~pro :
            a rule"
     | Configs (_ :: _)
     | Pattern _ ->
-        Some { rules_source; pro; core_runner_conf; common }
+        Some { rules_source; pro; json; core_runner_conf; common }
   else None
 
 let test_CLI_conf ~test ~target_roots ~config ~json ~optimizations
@@ -1581,7 +1581,8 @@ let cmdline_term caps ~allow_empty_config : conf Term.t =
      * alt: we could move this code in a Validate_subcommand.cli_args()
      *)
     let validate : Validate_CLI.conf option =
-      validate_CLI_conf ~validate ~rules_source ~core_runner_conf ~common ~pro
+      validate_CLI_conf ~validate ~rules_source ~core_runner_conf ~json ~common
+        ~pro
     in
     (* ugly: test should be a separate subcommand *)
     let test : Test_CLI.conf option =

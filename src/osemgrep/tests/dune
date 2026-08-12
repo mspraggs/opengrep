@@ -5,6 +5,9 @@
   (libraries
     commons
 
+    ; to serve the metarules pack to 'validate' without the network
+    networking.http_mock_client
+
     osemgrep_cli
   )
  (preprocess

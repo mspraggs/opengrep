@@ -27,6 +27,9 @@ type conf = {
    *)
   rules_source : Rules_source.t;
   pro : bool;
+  (* coupling: like Test_CLI.conf, we carry just a bool and not an Output.conf;
+   * validate has no -o/--<format>-output to honour. *)
+  json : bool;
   (* TODO? really needed? *)
   core_runner_conf : Core_runner.conf;
   common : CLI_common.conf;
@@ -52,6 +55,11 @@ let o_pro : bool Term.t =
   in
   Arg.value (Arg.flag info)
 
+(* coupling: Test_CLI.o_json *)
+let o_json : bool Term.t =
+  let info = Arg.info [ "json" ] ~doc:{|Output results in JSON format.|} in
+  Arg.value (Arg.flag info)
+
 (* ------------------------------------------------------------------ *)
 (* Positional arguments *)
 (* ------------------------------------------------------------------ *)
@@ -70,16 +78,16 @@ let o_args : string list Term.t =
 let cmdline_term : conf Term.t =
   (* !The parameters must be in alphabetic orders to match the order
    * of the corresponding '$ o_xx $' further below! *)
-  let combine args common pro =
+  let combine args common json pro =
     let rules_source =
       match args with
       | [] -> Error.abort "Nothing to validate, pass a directory or rule file"
       | xs -> Rules_source.Configs xs
     in
     let core_runner_conf = Core_runner.default_conf in
-    { rules_source; pro; core_runner_conf; common }
+    { rules_source; pro; json; core_runner_conf; common }
   in
-  Term.(const combine $ o_args $ CLI_common.o_common $ o_pro)
+  Term.(const combine $ o_args $ CLI_common.o_common $ o_json $ o_pro)
 
 let doc = "validating the rules"
 
