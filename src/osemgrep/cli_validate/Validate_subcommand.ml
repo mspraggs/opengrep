@@ -296,14 +296,18 @@ let run_conf (caps : < caps ; .. >) (conf : Validate_CLI.conf) : Exit_code.t =
   in
 
   (* step3: summarizing findings (errors) *)
-  (* alt? care about fatal_errors? usually because not semgrep rule file *)
+  (* num_errors counts the skippable errors only; the fatal ones are reported
+   * separately, hence the two counts below. *)
   let num_errors = num_invalid_rules + List.length metacheck_errors in
   report_errors
     (caps :> < Cap.stdout >)
     ~metacheck_errors ~num_errors ~num_fatal_errors ~num_rules;
 
-  (* step4: exit code *)
-  match num_errors with
+  (* step4: exit code.
+   * The fatal errors count here too: a config we could not even parse is
+   * reported as invalid above, so exiting 0 for it would contradict the
+   * message we just printed. *)
+  match num_errors + num_fatal_errors with
   | 0 -> Exit_code.ok ~__LOC__
   | _else_ ->
       (* was a raise SemgrepError originally *)
