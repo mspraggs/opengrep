@@ -64,10 +64,27 @@ let record profiler ~name fn =
   in
   Common.protect ~finally fn
 
-let dump profiler =
-  Hashtbl.fold
-    (fun name value acc ->
-      match value with
-      | Recorded time -> (name, time) :: acc
-      | _ -> acc)
-    profiler []
+(* A metric that is still running is reported with the time elapsed so far,
+ * which is what lets "total_time" be reported: it is stopped only after the
+ * output has been produced (see Scan_subcommand.ml). pysemgrep gets the same
+ * number a different way, by saving "total_time" just before building the
+ * output.
+ *
+ * coupling: this must not stop the running metrics instead. Output.ml reads
+ * the raw start timestamp of "total_time" for the start_time of the GitLab
+ * formats, which only a Start entry carries.
+ *
+ * A name recorded several times ('record' uses Hashtbl.add) is resolved the
+ * way Hashtbl.find does, the last recording winning, as with the dict of
+ * pysemgrep's ProfileManager. Sorting by name keeps the JSON output
+ * deterministic; it also happens to give the order in which pysemgrep
+ * inserts the metrics it has in common with us.
+ *)
+let snapshot profiler =
+  let now = Unix.gettimeofday () in
+  Hashtbl.fold (fun name _value acc -> name :: acc) profiler []
+  |> List.sort_uniq String.compare
+  |> List_.map (fun name ->
+         match Hashtbl.find profiler name with
+         | Recorded time -> (name, time)
+         | Start start_time -> (name, now -. start_time))

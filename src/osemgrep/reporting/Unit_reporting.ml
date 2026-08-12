@@ -156,8 +156,87 @@ let test_string_of_formulas _caps =
                             title)))))
 
 (*****************************************************************************)
+(* profiling_times (the --time output) *)
+(*****************************************************************************)
+
+(* the part of the profile that opengrep-core fills; the values are
+ * arbitrary, what matters below is that they survive the merge *)
+let core_profile : Out.profile =
+  {
+    rules = [];
+    rules_parse_time = 0.5;
+    profiling_times = [];
+    targets = [];
+    total_bytes = 42;
+    max_memory_bytes = None;
+  }
+
+let empty_cli_output : Out.cli_output =
+  {
+    version = None;
+    results = [];
+    errors = [];
+    paths = { scanned = []; skipped = None };
+    time = None;
+    explanations = None;
+    rules_by_engine = None;
+    engine_requested = None;
+    interfile_languages_used = None;
+    skipped_rules = [];
+  }
+
+let profile_of_output (cli_output : Out.cli_output) : Out.profile =
+  match cli_output.time with
+  | Some profile -> profile
+  | None -> failwith "the profile was dropped"
+
+let test_profiling_times _caps =
+  Testo.categorize "profiling_times"
+    [
+      t "without --time there is no profile to fill" (fun () ->
+          let profiler = Profiler.make () in
+          Profiler.record profiler ~name:"core_time" (fun () -> ());
+          let res = Output.with_profiling_times profiler empty_cli_output in
+          Alcotest.(check bool) __LOC__ true (Option.is_none res.time));
+      t "the metrics of the profiler are reported, sorted by name" (fun () ->
+          let profiler = Profiler.make () in
+          (* still running, as total_time is while the output is produced *)
+          Profiler.start profiler ~name:"total_time";
+          Profiler.record profiler ~name:"core_time" (fun () -> ());
+          Profiler.record profiler ~name:"config_time" (fun () -> ());
+          let profile =
+            { empty_cli_output with time = Some core_profile }
+            |> Output.with_profiling_times profiler
+            |> profile_of_output
+          in
+          (* coupling: the metrics pysemgrep reports, see run_scan.py *)
+          Alcotest.(check (list string))
+            __LOC__
+            [ "config_time"; "core_time"; "total_time" ]
+            (profile.profiling_times |> List_.map fst);
+          (* a running metric is reported with the time elapsed so far, not
+           * with 0. nor with its start timestamp *)
+          let total_time = List.assoc "total_time" profile.profiling_times in
+          Alcotest.(check bool)
+            __LOC__ true
+            (total_time >= 0. && total_time < 60.);
+          (* what opengrep-core computed is left alone *)
+          Alcotest.(check int) __LOC__ 42 profile.total_bytes;
+          Alcotest.(check (float 0.001))
+            __LOC__ 0.5 profile.rules_parse_time);
+      t "a metric recorded twice is reported once" (fun () ->
+          let profiler = Profiler.make () in
+          Profiler.record profiler ~name:"core_time" (fun () -> ());
+          Profiler.record profiler ~name:"core_time" (fun () -> ());
+          Alcotest.(check (list string))
+            __LOC__ [ "core_time" ]
+            (Profiler.snapshot profiler |> List_.map fst));
+    ]
+
+(*****************************************************************************)
 (* Entry point *)
 (*****************************************************************************)
 
 let tests caps =
-  Testo.categorize_suites "Osemgrep reporting" [ test_string_of_formulas caps ]
+  Testo.categorize_suites "Osemgrep reporting"
+    [ test_string_of_formulas caps; test_profiling_times caps ]

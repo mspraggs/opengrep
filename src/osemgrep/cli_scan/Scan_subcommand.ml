@@ -546,32 +546,38 @@ let check_targets_with_rules
             (List.length selected));
       Logs.info (fun m -> m "running the opengrep engine");
       let (result_or_exn : Core_result.result_or_exn) =
-        match conf.targeting_conf.baseline_commit with
-        | None ->
-            Profiler.record profiler ~name:"core_time" (fun () ->
+        (* python: profiler.save("core_time", ...) wraps run_rules() in
+         * run_scan.py, diff scans included, hence the record around both
+         * branches below. In a diff scan we additionally record
+         * baseline_core_time and head_core_time, which pysemgrep has no
+         * equivalent for.
+         *)
+        Profiler.record profiler ~name:"core_time" (fun () ->
+            match conf.targeting_conf.baseline_commit with
+            | None ->
                 let { run } : Core_runner.func =
                   mk_core_run_for_osemgrep caps conf
                     Differential_scan_config.WholeScan
                 in
                 run ?file_match_hook
                   conf.core_runner_conf conf.targeting_conf conf.matching_conf
-                  (rules, invalid_rules) selected)
-        | Some baseline_commit ->
-            (* scan_baseline calls internally Profiler.record "head_core_time"  *)
-            (* diff scan mode *)
-            let diff_scan_func : Diff_scan.diff_scan_func =
-             fun ?(diff_config = Differential_scan_config.WholeScan) targets
-                 rules ->
-              let { run } : Core_runner.func =
-                mk_core_run_for_osemgrep caps conf diff_config
-              in
-              run ?file_match_hook
-                conf.core_runner_conf conf.targeting_conf conf.matching_conf
-                (rules, invalid_rules) targets
-            in
-            Diff_scan.scan_baseline
-              (caps :> < Cap.chdir ; Cap.tmp >)
-              conf profiler baseline_commit selected rules diff_scan_func
+                  (rules, invalid_rules) selected
+            | Some baseline_commit ->
+                (* scan_baseline calls internally Profiler.record "head_core_time"  *)
+                (* diff scan mode *)
+                let diff_scan_func : Diff_scan.diff_scan_func =
+                 fun ?(diff_config = Differential_scan_config.WholeScan) targets
+                     rules ->
+                  let { run } : Core_runner.func =
+                    mk_core_run_for_osemgrep caps conf diff_config
+                  in
+                  run ?file_match_hook
+                    conf.core_runner_conf conf.targeting_conf conf.matching_conf
+                    (rules, invalid_rules) targets
+                in
+                Diff_scan.scan_baseline
+                  (caps :> < Cap.chdir ; Cap.tmp >)
+                  conf profiler baseline_commit selected rules diff_scan_func)
       in
       match result_or_exn with
       | Error exn ->
@@ -701,11 +707,16 @@ let run_scan_conf (caps : < caps ; .. >) (conf : Scan_CLI.conf) : Exit_code.t =
   (* Display a (possibly interactive) message to denote rule fetching *)
   display_rule_source ~rule_source:conf.rules_source;
   let rules_and_origins, fatal_errors =
-    rules_from_rules_source
-      (caps :> < Cap.network ; Cap.tmp >)
-      ~skip_invalid_configs:conf.skip_invalid_configs
-      ~rewrite_rule_ids:conf.rewrite_rule_ids
-      ~strict:conf.core_runner_conf.strict conf.rules_source
+    (* python: profiler.save("config_time", ...) in run_scan.py.
+     * Note that 'record' runs its finally even when fetching the rules
+     * raises, so the metric is reported for the scans that abort here too.
+     *)
+    Profiler.record profiler ~name:"config_time" (fun () ->
+        rules_from_rules_source
+          (caps :> < Cap.network ; Cap.tmp >)
+          ~skip_invalid_configs:conf.skip_invalid_configs
+          ~rewrite_rule_ids:conf.rewrite_rule_ids
+          ~strict:conf.core_runner_conf.strict conf.rules_source)
   in
 
   match fatal_errors with

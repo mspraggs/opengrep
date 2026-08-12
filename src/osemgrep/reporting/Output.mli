@@ -68,6 +68,13 @@ val output_result :
  *)
 val preprocess_result : fixed_lines:bool -> Core_runner.result -> Out.cli_output
 
+(* Fill the profiling_times of the profile reported with --time, which
+ * opengrep-core leaves empty, with the metrics of the profiler.
+ * Returns cli_output unchanged when --time was not requested.
+ * Exposed for testing.
+ *)
+val with_profiling_times : Profiler.t -> Out.cli_output -> Out.cli_output
+
 (* used by RPC_return.ml for Vim/Emacs/Junit_xml/Gitlab_xxx for now *)
 val format :
   ?profiler : Profiler.t ->

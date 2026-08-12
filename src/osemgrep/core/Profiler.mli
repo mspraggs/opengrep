@@ -14,7 +14,7 @@
         run profiler;
         List.iter (fun (name, time) ->
           Format.printf "%S took %fs\n%!" name time)
-          (Profiler.dump profiler)
+          (Profiler.snapshot profiler)
     ]}
 
     We can only record sequential tasks - the use of lwt {b is not} recommended.
@@ -45,5 +45,8 @@ val record : t -> name:string -> (unit -> 'a) -> 'a
 (** [record t ~name fn] records the time spent by the given [fn] and save it
     into the profiler with the name [name]. *)
 
-val dump : t -> (string * float) list
-(** [dump profiler] returns all recorded metrics. *)
+val snapshot : t -> (string * float) list
+(** [snapshot profiler] returns all the metrics known to [profiler], sorted by
+    name. A metric that is still running is reported with the time elapsed so
+    far, so that it can be reported before it is stopped. A metric recorded
+    several times is reported once, with its last recording. *)

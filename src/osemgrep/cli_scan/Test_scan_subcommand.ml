@@ -150,6 +150,25 @@ let normalize =
     Testo.mask_pcre_pattern {|\{"version":"([^"]+)","results":\[|}
   ]
 
+(* --time fills the output with durations and a peak memory figure, none of
+ * which is reproducible. We mask every JSON number that has a fraction or an
+ * exponent, which is exactly the durations wherever they appear, and spares
+ * the integers that carry signal (line, col, offset, total_bytes, num_bytes).
+ * The punctuation before the number is matched but left outside the capturing
+ * group, since mask_pcre_pattern replaces the group rather than the whole
+ * match: ':' for an object member such as "parse_time", ',' for the second
+ * element of the [rule_id, time] pairs of match_times. The exponent is not
+ * optional decoration either: a sub-microsecond duration is written 1e-06,
+ * without a '.' at all. *)
+let normalize_time =
+  normalize
+  @ [
+      Testo.mask_pcre_pattern
+        {|[:,](-?[0-9]+(?:\.[0-9]+(?:[eE][-+]?[0-9]+)?|[eE][-+]?[0-9]+))|};
+      (* an integer, so not covered by the mask above *)
+      Testo.mask_pcre_pattern {|"max_memory_bytes":([0-9]+)|};
+    ]
+
 let without_settings f =
   Semgrep_envvars.with_envvar "SEMGREP_SETTINGS_FILE" "nosettings.yaml" f
 
@@ -202,6 +221,29 @@ let test_basic_output_enclosing_context (caps : Scan_subcommand.caps) () =
                     "opengrep-scan"; "--experimental"; "--config"; "rules.yml";
                     "--output-enclosing-context";
                     "--json"
+                  |])
+          in
+          Exit_code.Check.ok exit_code))
+
+(* The 'time' object of the JSON output carries the profiling_times that the
+ * CLI adds to the profile computed by opengrep-core, which leaves them empty
+ * (see Output.with_profiling_times). The durations themselves are masked;
+ * what this snapshot is about is which metrics get reported. *)
+let test_basic_output_time (caps : Scan_subcommand.caps) () =
+  with_env_app_token (fun () ->
+      let repo_files =
+        [
+          F.File ("rules.yml", eqeq_basic_content);
+          F.File ("stupid.py", stupid_py_content);
+        ]
+      in
+      Testutil_git.with_git_repo ~verbose:true repo_files (fun _cwd ->
+          let exit_code =
+            without_settings (fun () ->
+                Scan_subcommand.main caps
+                  [|
+                    "opengrep-scan"; "--experimental"; "--config"; "rules.yml";
+                    "--json"; "--time"
                   |])
           in
           Exit_code.Check.ok exit_code))
@@ -373,6 +415,9 @@ let tests (caps : < Scan_subcommand.caps >) =
         (test_basic_output_enclosing_context caps);
       t "basic output with --opengrep-ignore-pattern" ~checked_output:(Testo.stdxxx ()) ~normalize
         (test_basic_output_ignore_pattern caps);
+      t "basic output with --time" ~checked_output:(Testo.stdxxx ())
+        ~normalize:normalize_time
+        (test_basic_output_time caps);
       t "incremental output with --incremental-output-postprocess"
         ~checked_output:(Testo.stdxxx ()) ~normalize
         (test_basic_output_nosem_incremental caps);

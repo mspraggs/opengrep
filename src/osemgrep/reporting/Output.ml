@@ -85,6 +85,25 @@ let start_time_from_profiler_opt (profiler : Profiler.t) : Timedesc.Timestamp.t 
   | Some (Profiler.Start t) -> Some (Timedesc.Timestamp.of_float_s t)
   | _ -> None
 
+(* python: the profiling_times part of _build_time_json() in output.py, which
+ * is the only thing pysemgrep adds to the profile computed by opengrep-core.
+ * The core leaves profiling_times empty on purpose (see Core_json_output.ml)
+ * because only the CLI knows about the phases surrounding the core scan.
+ *
+ * The profile is built only when --time was requested, so a time of None is
+ * how we learn there is nothing to enrich.
+ *)
+let with_profiling_times (profiler : Profiler.t) (cli_output : Out.cli_output) :
+    Out.cli_output =
+  match cli_output.time with
+  | None -> cli_output
+  | Some (profile : Out.profile) ->
+      {
+        cli_output with
+        time =
+          Some { profile with profiling_times = Profiler.snapshot profiler };
+      }
+
 (*****************************************************************************)
 (* Format dispatcher *)
 (*****************************************************************************)
@@ -381,10 +400,12 @@ let output_result (caps : < Cap.stdout >) (conf : conf)
    * it here.
    *)
   let (cli_output : Out.cli_output) =
-    Profiler.record profiler ~name:"ignores_times" (fun () ->
+    Profiler.record profiler ~name:"ignores_time" (fun () ->
         preprocess_result ~fixed_lines:conf.fixed_lines res)
   in
-  (* TODO: adjust conf.time *)
+  (* after the ignores_time above so that it is reported too, and before the
+   * output below so that total_time excludes the rendering, as in pysemgrep *)
+  let cli_output = with_profiling_times profiler cli_output in
   let cli_output =
     if not conf.skipped_files then
       {

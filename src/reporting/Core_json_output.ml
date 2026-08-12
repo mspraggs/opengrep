@@ -565,7 +565,8 @@ let profiling_to_profiling (profiling_data : Core_profiling.t) : Out.profile =
       |> List_.map (fun { Core_profiling.file_size_bytes; _ } ->
              Option.value ~default:0 file_size_bytes)
       |> Common2.sum_int;
-    (* those are filled later in pysemgrep from the Profiler class *)
+    (* those are filled later from the Profiler class, in pysemgrep and in
+     * osemgrep (see Output.with_profiling_times) *)
     profiling_times = [];
   }
 
